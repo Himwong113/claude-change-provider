@@ -110,6 +110,7 @@
                         {% endif %}
                     </td>
                     <td>
+                        <button class="btn btn-secondary btn-small" onclick="showEditVendor('{{ v.name }}')">Edit</button>
                         <button class="btn btn-secondary btn-small" onclick="showSetKey('{{ v.name }}')">Set Key</button>
                         <button class="btn btn-secondary btn-small" onclick="showEnv('{{ v.name }}')">Env</button>
                         <button class="btn btn-danger btn-small" onclick="removeVendor('{{ v.name }}')">Remove</button>
@@ -183,6 +184,45 @@
         </form>
     </div>
 
+    <!-- Edit Vendor Modal -->
+    <div id="editVendorModal" class="card hidden">
+        <h2>Edit Vendor: <span id="editVendorName"></span></h2>
+        <form id="editForm" onsubmit="return editVendorSubmit(event)">
+            <div class="grid-2">
+                <div class="form-row">
+                    <label>Model</label>
+                    <input type="text" id="editModel" required>
+                </div>
+                <div class="form-row">
+                    <label>Base URL</label>
+                    <input type="text" id="editBaseUrl">
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="form-row">
+                    <label>Auth Env</label>
+                    <select id="editAuthEnv">
+                        <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
+                        <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>Official</label>
+                    <select id="editOfficial">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <label>Extra Env (one KEY=VALUE per line)</label>
+                <textarea id="editExtraEnv" rows="3"></textarea>
+            </div>
+            <button type="submit" class="btn">Save Changes</button>
+            <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+        </form>
+    </div>
+
     <!-- Env Modal -->
     <div id="envModal" class="card hidden">
         <h2>Environment for <span id="envVendor"></span></h2>
@@ -191,6 +231,17 @@
     </div>
 
     <script>
+        window.vendorsData = {
+            {% for v in vendors %}
+            '{{ v.name }}': {
+                model: {{ v.model | tojson }},
+                base_url: {{ v.base_url | tojson }},
+                auth_env: {{ v.auth_env | tojson }},
+                official: {{ v.official | tojson }},
+                extra_env: {{ (v.extra_env | items | map('join', '=') | join('\n')) | tojson }}
+            }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        };
         function showMsg(text, ok=true) {
             const el = document.getElementById('msg');
             el.textContent = text;
@@ -200,7 +251,38 @@
         }
         function hideModal() {
             document.getElementById('setKeyModal').classList.add('hidden');
+            document.getElementById('editVendorModal').classList.add('hidden');
             document.getElementById('envModal').classList.add('hidden');
+        }
+        function showEditVendor(name) {
+            const data = window.vendorsData[name];
+            if (!data) return;
+            document.getElementById('editVendorName').textContent = name;
+            document.getElementById('editModel').value = data.model;
+            document.getElementById('editBaseUrl').value = data.base_url || '';
+            document.getElementById('editAuthEnv').value = data.auth_env;
+            document.getElementById('editOfficial').value = data.official ? 'true' : 'false';
+            document.getElementById('editExtraEnv').value = data.extra_env;
+            document.getElementById('editVendorModal').classList.remove('hidden');
+        }
+        async function editVendorSubmit(e) {
+            e.preventDefault();
+            const vendor = document.getElementById('editVendorName').textContent;
+            const fd = new FormData();
+            fd.append('model', document.getElementById('editModel').value);
+            fd.append('base_url', document.getElementById('editBaseUrl').value);
+            fd.append('auth_env', document.getElementById('editAuthEnv').value);
+            fd.append('official', document.getElementById('editOfficial').value);
+            fd.append('extra_env', document.getElementById('editExtraEnv').value);
+            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor), { method: 'PUT', body: fd });
+            if (res.ok) {
+                showMsg('Vendor updated');
+                location.reload();
+            } else {
+                const data = await res.json();
+                showMsg(data.detail || 'Failed to update vendor', false);
+            }
+            return false;
         }
         async function addVendor(e) {
             e.preventDefault();
