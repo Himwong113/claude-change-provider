@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>claudeapikey</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: #0d1117;
+            color: #c9d1d9;
+        }
+        h1 { color: #58a6ff; margin-top: 0; }
+        h2 { color: #79c0ff; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem; }
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #30363d; }
+        th { color: #8b949e; }
+        .btn {
+            background: #238636;
+            color: white;
+            border: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .btn:hover { background: #2ea043; }
+        .btn-secondary { background: #1f6feb; }
+        .btn-secondary:hover { background: #388bfd; }
+        .btn-danger { background: #da3633; }
+        .btn-danger:hover { background: #f85149; }
+        .btn-small { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
+        .tag {
+            display: inline-block;
+            background: #30363d;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            color: #8b949e;
+        }
+        .tag-green { background: #23863633; color: #3fb950; }
+        .tag-red { background: #da363333; color: #f85149; }
+        input, select, textarea {
+            background: #0d1117;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 0.4rem 0.6rem;
+            width: 100%;
+            font-size: 0.9rem;
+        }
+        .form-row { margin-bottom: 0.75rem; }
+        .form-row label { display: block; margin-bottom: 0.25rem; font-size: 0.85rem; color: #8b949e; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        pre {
+            background: #0d1117;
+            padding: 0.75rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.85rem;
+        }
+        .hidden { display: none; }
+        .message { padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; }
+        .message.ok { background: #23863633; color: #3fb950; }
+        .message.error { background: #da363333; color: #f85149; }
+    </style>
+</head>
+<body>
+    <h1>🔑 claudeapikey</h1>
+    <p>Claude Code vendor switcher dashboard</p>
+
+    <div id="msg" class="message hidden"></div>
+
+    <div class="card">
+        <h2>Vendors</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Model</th>
+                    <th>Base URL</th>
+                    <th>Auth</th>
+                    <th>Key</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in vendors %}
+                <tr>
+                    <td><strong>{{ v.name }}</strong></td>
+                    <td>{{ v.model }}</td>
+                    <td>{{ v.base_url }}</td>
+                    <td>{{ v.auth_env }}</td>
+                    <td>
+                        {% if v.key_set %}
+                        <span class="tag tag-green">{{ v.key_masked }}</span>
+                        {% else %}
+                        <span class="tag tag-red">not set</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <button class="btn btn-secondary btn-small" onclick="showSetKey('{{ v.name }}')">Set Key</button>
+                        <button class="btn btn-secondary btn-small" onclick="showEnv('{{ v.name }}')">Env</button>
+                        <button class="btn btn-danger btn-small" onclick="removeVendor('{{ v.name }}')">Remove</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" style="text-align:center;color:#8b949e">No vendors configured.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Add Vendor</h2>
+        <form id="addForm" onsubmit="return addVendor(event)">
+            <div class="grid-2">
+                <div class="form-row">
+                    <label>Name</label>
+                    <input type="text" name="vendor" required placeholder="deepseek">
+                </div>
+                <div class="form-row">
+                    <label>Model</label>
+                    <input type="text" name="model" required placeholder="deepseek-v4-pro">
+                </div>
+            </div>
+            <div class="form-row">
+                <label>Base URL</label>
+                <input type="text" name="base_url" placeholder="https://api.example.com/anthropic">
+            </div>
+            <div class="grid-2">
+                <div class="form-row">
+                    <label>Auth Env</label>
+                    <select name="auth_env">
+                        <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
+                        <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>Official</label>
+                    <select name="official">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <label>Extra Env (one KEY=VALUE per line)</label>
+                <textarea name="extra_env" rows="3" placeholder="CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1"></textarea>
+            </div>
+            <button type="submit" class="btn">Add Vendor</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Diagnostics</h2>
+        <button class="btn btn-secondary" onclick="runDoctor()">Run Doctor</button>
+        <pre id="doctorOutput" class="hidden"></pre>
+    </div>
+
+    <!-- Set Key Modal -->
+    <div id="setKeyModal" class="card hidden">
+        <h2>Set Key for <span id="setKeyVendor"></span></h2>
+        <form onsubmit="return setKey(event)">
+            <div class="form-row">
+                <label>API Key</label>
+                <input type="password" id="setKeyInput" required placeholder="sk-...">
+            </div>
+            <button type="submit" class="btn">Save Key</button>
+            <button type="button" class="btn btn-danger" onclick="deleteKey()">Delete Key</button>
+            <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+        </form>
+    </div>
+
+    <!-- Env Modal -->
+    <div id="envModal" class="card hidden">
+        <h2>Environment for <span id="envVendor"></span></h2>
+        <pre id="envOutput"></pre>
+        <button class="btn btn-secondary" onclick="hideModal()">Close</button>
+    </div>
+
+    <script>
+        function showMsg(text, ok=true) {
+            const el = document.getElementById('msg');
+            el.textContent = text;
+            el.className = 'message ' + (ok ? 'ok' : 'error');
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 4000);
+        }
+        function hideModal() {
+            document.getElementById('setKeyModal').classList.add('hidden');
+            document.getElementById('envModal').classList.add('hidden');
+        }
+        async function addVendor(e) {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const vendor = fd.get('vendor');
+            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor), { method: 'POST', body: fd });
+            if (res.ok) {
+                showMsg('Vendor added');
+                location.reload();
+            } else {
+                const data = await res.json();
+                showMsg(data.detail || 'Failed to add vendor', false);
+            }
+            return false;
+        }
+        function showSetKey(vendor) {
+            document.getElementById('setKeyVendor').textContent = vendor;
+            document.getElementById('setKeyModal').classList.remove('hidden');
+            document.getElementById('setKeyInput').value = '';
+        }
+        async function setKey(e) {
+            e.preventDefault();
+            const vendor = document.getElementById('setKeyVendor').textContent;
+            const key = document.getElementById('setKeyInput').value;
+            const fd = new FormData();
+            fd.append('key', key);
+            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor) + '/key', { method: 'POST', body: fd });
+            if (res.ok) {
+                showMsg('Key saved');
+                location.reload();
+            } else {
+                showMsg('Failed to save key', false);
+            }
+            return false;
+        }
+        async function deleteKey() {
+            const vendor = document.getElementById('setKeyVendor').textContent;
+            if (!confirm('Delete key for ' + vendor + '?')) return;
+            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor) + '/key', { method: 'DELETE' });
+            if (res.ok) {
+                showMsg('Key deleted');
+                location.reload();
+            } else {
+                showMsg('Failed to delete key', false);
+            }
+        }
+        async function removeVendor(vendor) {
+            if (!confirm('Remove vendor ' + vendor + '?')) return;
+            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor), { method: 'DELETE' });
+            if (res.ok) {
+                showMsg('Vendor removed');
+                location.reload();
+            } else {
+                showMsg('Failed to remove vendor', false);
+            }
+        }
+        async function showEnv(vendor) {
+            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor) + '/env');
+            const data = await res.json();
+            document.getElementById('envVendor').textContent = vendor;
+            document.getElementById('envOutput').textContent = data.exports || data.detail;
+            document.getElementById('envModal').classList.remove('hidden');
+        }
+        async function runDoctor() {
+            const res = await fetch('/api/doctor');
+            const data = await res.json();
+            const out = data.messages.map(m => `[${m.status}] ${m.detail}`).join('\n');
+            const el = document.getElementById('doctorOutput');
+            el.textContent = out + '\n\nResult: ' + (data.ok ? 'OK' : 'Issues found');
+            el.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
