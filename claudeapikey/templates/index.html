@@ -110,10 +110,10 @@
                         {% endif %}
                     </td>
                     <td>
-                        <button class="btn btn-secondary btn-small" onclick="showEditVendor('{{ v.name }}')">Edit</button>
-                        <button class="btn btn-secondary btn-small" onclick="showSetKey('{{ v.name }}')">Set Key</button>
-                        <button class="btn btn-secondary btn-small" onclick="showEnv('{{ v.name }}')">Env</button>
-                        <button class="btn btn-danger btn-small" onclick="removeVendor('{{ v.name }}')">Remove</button>
+                        <button class="btn btn-secondary btn-small" onclick="showEditVendor(this.dataset.vendor)" data-vendor="{{ v.name }}">Edit</button>
+                        <button class="btn btn-secondary btn-small" onclick="showSetKey(this.dataset.vendor)" data-vendor="{{ v.name }}">Set Key</button>
+                        <button class="btn btn-secondary btn-small" onclick="showEnv(this.dataset.vendor)" data-vendor="{{ v.name }}">Env</button>
+                        <button class="btn btn-danger btn-small" onclick="removeVendor(this.dataset.vendor)" data-vendor="{{ v.name }}">Remove</button>
                     </td>
                 </tr>
                 {% else %}
@@ -125,7 +125,7 @@
 
     <div class="card">
         <h2>Add Vendor</h2>
-        <form id="addForm" onsubmit="return addVendor(event)">
+        <form id="addForm">
             <div class="grid-2">
                 <div class="form-row">
                     <label>Name</label>
@@ -160,6 +160,10 @@
                 <label>Extra Env (one KEY=VALUE per line)</label>
                 <textarea name="extra_env" rows="3" placeholder="CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1"></textarea>
             </div>
+            <div class="form-row">
+                <label>API Key (optional)</label>
+                <input type="password" name="key" placeholder="sk-...">
+            </div>
             <button type="submit" class="btn">Add Vendor</button>
         </form>
     </div>
@@ -187,7 +191,7 @@
     <!-- Edit Vendor Modal -->
     <div id="editVendorModal" class="card hidden">
         <h2>Edit Vendor: <span id="editVendorName"></span></h2>
-        <form id="editForm" onsubmit="return editVendorSubmit(event)">
+        <form id="editForm">
             <div class="grid-2">
                 <div class="form-row">
                     <label>Model</label>
@@ -218,6 +222,10 @@
                 <label>Extra Env (one KEY=VALUE per line)</label>
                 <textarea id="editExtraEnv" rows="3"></textarea>
             </div>
+            <div class="form-row">
+                <label>API Key (leave empty to keep current)</label>
+                <input type="password" id="editKey" placeholder="sk-...">
+            </div>
             <button type="submit" class="btn">Save Changes</button>
             <button type="button" class="btn btn-secondary" onclick="hideModal()">Cancel</button>
         </form>
@@ -233,7 +241,7 @@
     <script>
         window.vendorsData = {
             {% for v in vendors %}
-            '{{ v.name }}': {
+            {{ v.name | tojson }}: {
                 model: {{ v.model | tojson }},
                 base_url: {{ v.base_url | tojson }},
                 auth_env: {{ v.auth_env | tojson }},
@@ -248,6 +256,10 @@
             el.className = 'message ' + (ok ? 'ok' : 'error');
             el.classList.remove('hidden');
             setTimeout(() => el.classList.add('hidden'), 4000);
+        }
+        function logError(label, err) {
+            console.error('[' + label + ']', err);
+            showMsg(label + ': ' + (err.message || String(err)), false);
         }
         function hideModal() {
             document.getElementById('setKeyModal').classList.add('hidden');
@@ -267,36 +279,54 @@
         }
         async function editVendorSubmit(e) {
             e.preventDefault();
-            const vendor = document.getElementById('editVendorName').textContent;
-            const fd = new FormData();
-            fd.append('model', document.getElementById('editModel').value);
-            fd.append('base_url', document.getElementById('editBaseUrl').value);
-            fd.append('auth_env', document.getElementById('editAuthEnv').value);
-            fd.append('official', document.getElementById('editOfficial').value);
-            fd.append('extra_env', document.getElementById('editExtraEnv').value);
-            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor), { method: 'PUT', body: fd });
-            if (res.ok) {
-                showMsg('Vendor updated');
-                location.reload();
-            } else {
-                const data = await res.json();
-                showMsg(data.detail || 'Failed to update vendor', false);
+            try {
+                const vendor = document.getElementById('editVendorName').textContent;
+                const fd = new FormData();
+                fd.append('model', document.getElementById('editModel').value);
+                fd.append('base_url', document.getElementById('editBaseUrl').value);
+                fd.append('auth_env', document.getElementById('editAuthEnv').value);
+                fd.append('official', document.getElementById('editOfficial').value);
+                fd.append('extra_env', document.getElementById('editExtraEnv').value);
+                const key = document.getElementById('editKey').value;
+                if (key) {
+                    fd.append('key', key);
+                }
+                const res = await fetch('/api/vendors/' + encodeURIComponent(vendor), { method: 'PUT', body: fd });
+                if (res.ok) {
+                    showMsg('Vendor updated');
+                    setTimeout(() => location.reload(), 600);
+                } else {
+                    const data = await res.json();
+                    showMsg(data.detail || 'Failed to update vendor', false);
+                }
+            } catch (err) {
+                logError('Edit vendor failed', err);
             }
-            return false;
         }
         async function addVendor(e) {
             e.preventDefault();
-            const fd = new FormData(e.target);
-            const vendor = fd.get('vendor');
-            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor), { method: 'POST', body: fd });
-            if (res.ok) {
-                showMsg('Vendor added');
-                location.reload();
-            } else {
-                const data = await res.json();
-                showMsg(data.detail || 'Failed to add vendor', false);
+            try {
+                const fd = new FormData(e.target);
+                const vendor = fd.get('vendor');
+                const key = fd.get('key');
+                // Remove key from add form data, handle separately after vendor creation
+                fd.delete('key');
+                const res = await fetch('/api/vendors/' + encodeURIComponent(vendor), { method: 'POST', body: fd });
+                if (res.ok) {
+                    if (key) {
+                        const keyFd = new FormData();
+                        keyFd.append('key', key);
+                        await fetch('/api/vendors/' + encodeURIComponent(vendor) + '/key', { method: 'POST', body: keyFd });
+                    }
+                    showMsg('Vendor added');
+                    setTimeout(() => location.reload(), 600);
+                } else {
+                    const data = await res.json();
+                    showMsg(data.detail || 'Failed to add vendor', false);
+                }
+            } catch (err) {
+                logError('Add vendor failed', err);
             }
-            return false;
         }
         function showSetKey(vendor) {
             document.getElementById('setKeyVendor').textContent = vendor;
@@ -305,18 +335,21 @@
         }
         async function setKey(e) {
             e.preventDefault();
-            const vendor = document.getElementById('setKeyVendor').textContent;
-            const key = document.getElementById('setKeyInput').value;
-            const fd = new FormData();
-            fd.append('key', key);
-            const res = await fetch('/api/vendors/' + encodeURIComponent(vendor) + '/key', { method: 'POST', body: fd });
-            if (res.ok) {
-                showMsg('Key saved');
-                location.reload();
-            } else {
-                showMsg('Failed to save key', false);
+            try {
+                const vendor = document.getElementById('setKeyVendor').textContent;
+                const key = document.getElementById('setKeyInput').value;
+                const fd = new FormData();
+                fd.append('key', key);
+                const res = await fetch('/api/vendors/' + encodeURIComponent(vendor) + '/key', { method: 'POST', body: fd });
+                if (res.ok) {
+                    showMsg('Key saved');
+                    setTimeout(() => location.reload(), 600);
+                } else {
+                    showMsg('Failed to save key', false);
+                }
+            } catch (err) {
+                logError('Set key failed', err);
             }
-            return false;
         }
         async function deleteKey() {
             const vendor = document.getElementById('setKeyVendor').textContent;
@@ -354,6 +387,8 @@
             el.textContent = out + '\n\nResult: ' + (data.ok ? 'OK' : 'Issues found');
             el.classList.remove('hidden');
         }
+        document.getElementById('addForm').addEventListener('submit', addVendor);
+        document.getElementById('editForm').addEventListener('submit', editVendorSubmit);
     </script>
 </body>
 </html>

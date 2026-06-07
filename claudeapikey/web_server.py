@@ -10,7 +10,7 @@ from starlette.requests import Request
 
 from claudeapikey.config_store import load_config, save_config
 from claudeapikey.doctor import run_doctor
-from claudeapikey.env_builder import build_env_exports
+from claudeapikey.env_builder import build_env
 from claudeapikey.models import Config, VendorProfile
 from claudeapikey.secret_store import (
     delete_key,
@@ -24,6 +24,31 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app = FastAPI(title="claudeapikey")
+
+# ---------------------------------------------------------------------------
+# CSRF protection: reject state-changing requests whose Origin header does not
+# match a localhost origin.  Browsers always send Origin on cross-origin
+# POST/PUT/DELETE requests, so this blocks CSRF from remote sites while still
+# allowing direct curl / CLI calls (which send no Origin header).
+# ---------------------------------------------------------------------------
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_LOCALHOST_ORIGINS = {
+    "http://127.0.0.1",
+    "http://localhost",
+}
+
+
+@app.middleware("http")
+async def csrf_origin_check(request: Request, call_next):  # type: ignore[no-untyped-def]
+    if request.method not in _SAFE_METHODS:
+        origin = request.headers.get("origin")
+        if origin is not None:
+            # Strip port so http://127.0.0.1:8787 and http://localhost:8787 both pass
+            origin_base = origin.rsplit(":", 1)[0] if origin.count(":") > 1 else origin
+            if origin_base not in _LOCALHOST_ORIGINS:
+                from fastapi.responses import JSONResponse as _JSONResponse
+                return _JSONResponse({"detail": "CSRF check failed"}, status_code=403)
+    return await call_next(request)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -113,6 +138,7 @@ async def api_edit_vendor(
     model: str | None = Form(None),
     official: bool | None = Form(None),
     extra_env: str | None = Form(None),
+    key: str | None = Form(None),
 ) -> JSONResponse:
     config = load_config()
     if vendor not in config.vendors:
@@ -144,6 +170,10 @@ async def api_edit_vendor(
 
     config.vendors[vendor] = profile
     save_config(config)
+
+    if key is not None:
+        set_key(vendor, key)
+
     return JSONResponse({"status": "ok", "vendor": vendor})
 
 
@@ -182,10 +212,18 @@ async def api_env(vendor: str) -> JSONResponse:
     config = load_config()
     if vendor not in config.vendors:
         raise HTTPException(status_code=404, detail="Vendor not found")
+    profile = config.vendors[vendor]
     try:
-        exports = build_env_exports(vendor)
+        env = build_env(vendor)
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # Mask the auth key — the web UI is display-only; never return the raw key over HTTP.
+    lines = []
+    for k, v in env.items():
+        display_v = mask_key(v) if k == profile.auth_env else v
+        escaped = display_v.replace("'", "'\"'\"'")
+        lines.append(f"export {k}='{escaped}'")
+    exports = "\n".join(lines)
     return JSONResponse({"vendor": vendor, "exports": exports})
 
 

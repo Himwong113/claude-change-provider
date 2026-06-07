@@ -30,27 +30,33 @@ if ! $PYTHON_CMD -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)" 
     exit 1
 fi
 
-# Create virtual environment
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$PROJECT_DIR/.venv"
 
-if [[ ! -d "$VENV_DIR" ]]; then
-    echo "Creating virtual environment in $VENV_DIR ..."
-    "$PYTHON_CMD" -m venv "$VENV_DIR"
+# Check if claudeapikey is already installed
+if command -v claudeapikey &>/dev/null; then
+    echo "claudeapikey already installed: $(which claudeapikey)"
 else
-    echo "Virtual environment already exists."
+    # Create virtual environment
+    VENV_DIR="$PROJECT_DIR/.venv"
+
+    if [[ ! -d "$VENV_DIR" ]]; then
+        echo "Creating virtual environment in $VENV_DIR ..."
+        "$PYTHON_CMD" -m venv "$VENV_DIR"
+    else
+        echo "Virtual environment already exists."
+    fi
+
+    # Activate venv
+    source "$VENV_DIR/bin/activate"
+
+    # Upgrade pip
+    echo "Upgrading pip ..."
+    pip install --quiet --upgrade pip
+
+    # Install package
+    echo "Installing claudeapikey ..."
+    pip install --quiet -e "$PROJECT_DIR"
 fi
-
-# Activate venv
-source "$VENV_DIR/bin/activate"
-
-# Upgrade pip
-echo "Upgrading pip ..."
-pip install --quiet --upgrade pip
-
-# Install package
-echo "Installing claudeapikey ..."
-pip install --quiet -e "$PROJECT_DIR"
 
 # Check for claude
 echo ""

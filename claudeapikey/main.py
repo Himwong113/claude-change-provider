@@ -76,13 +76,45 @@ def install() -> None:
     console.print("  [cyan]claudeapikey run deepseek[/cyan]")
 
 
+# Known vendor presets
+KNOWN_VENDORS: dict[str, dict[str, str | bool | dict[str, str]]] = {
+    "kimi": {
+        "base_url": "https://api.kimi.com/coding/",
+        "auth_env": "ANTHROPIC_AUTH_TOKEN",
+        "model": "kimi-k2.6",
+        "official": False,
+        "extra_env": {
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k2.6",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k2.6",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k2.6",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "kimi-k2.6",
+            "ENABLE_TOOL_SEARCH": "false",
+        },
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/anthropic",
+        "auth_env": "ANTHROPIC_API_KEY",
+        "model": "deepseek-chat",
+        "official": False,
+        "extra_env": {},
+    },
+    "official": {
+        "base_url": None,
+        "auth_env": "ANTHROPIC_API_KEY",
+        "model": "claude-3-5-sonnet-20241022",
+        "official": True,
+        "extra_env": {},
+    },
+}
+
+
 @app.command()
 def add(
-    vendor: str = typer.Argument(..., help="Vendor name"),
+    vendor: str = typer.Argument(..., help="Vendor name (known presets: kimi, deepseek, official)"),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="API base URL"),
-    auth_env: str = typer.Option("ANTHROPIC_API_KEY", "--auth-env", help="Auth env var name"),
-    model: str = typer.Option(..., "--model", help="Model name"),
-    official: bool = typer.Option(False, "--official", help="Mark as official Anthropic API"),
+    auth_env: Optional[str] = typer.Option(None, "--auth-env", help="Auth env var name"),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name"),
+    official: Optional[bool] = typer.Option(None, "--official", help="Mark as official Anthropic API"),
     extra_env: Optional[list[str]] = typer.Option(
         None,
         "--extra-env",
@@ -95,6 +127,13 @@ def add(
         console.print(f"[red]Vendor '{vendor}' already exists. Use 'edit' to modify.[/red]")
         raise typer.Exit(1)
 
+    # Apply known vendor preset as defaults
+    preset = KNOWN_VENDORS.get(vendor, {})
+    effective_base_url = base_url if base_url is not None else preset.get("base_url")
+    effective_auth_env = auth_env if auth_env is not None else preset.get("auth_env", "ANTHROPIC_API_KEY")
+    effective_model = model if model is not None else preset.get("model")
+    effective_official = official if official is not None else preset.get("official", False)
+
     parsed_extra: dict[str, str] = {}
     if extra_env:
         for item in extra_env:
@@ -103,13 +142,23 @@ def add(
                 raise typer.Exit(1)
             k, v = item.split("=", 1)
             parsed_extra[k] = v
+    # Merge preset extra_env with user-provided extra_env (user overrides preset)
+    preset_extra = preset.get("extra_env", {})
+    if isinstance(preset_extra, dict):
+        merged_extra = dict(preset_extra)
+        merged_extra.update(parsed_extra)
+        parsed_extra = merged_extra
+
+    if effective_model is None:
+        console.print("[red]--model is required for unknown vendors.[/red]")
+        raise typer.Exit(1)
 
     try:
         profile = VendorProfile(
-            base_url=base_url,
-            auth_env=auth_env,  # type: ignore[arg-type]
-            model=model,
-            official=official,
+            base_url=effective_base_url,  # type: ignore[arg-type]
+            auth_env=effective_auth_env,  # type: ignore[arg-type]
+            model=effective_model,
+            official=effective_official,  # type: ignore[arg-type]
             extra_env=parsed_extra,
         )
     except Exception as e:
@@ -119,6 +168,8 @@ def add(
     config.vendors[vendor] = profile
     save_config(config)
     console.print(f"[green]Vendor '{vendor}' added.[/green]")
+    if vendor in KNOWN_VENDORS:
+        console.print(f"[dim]Used preset defaults for '{vendor}'.[/dim]")
     console.print(f"Set the API key: [cyan]claudeapikey key set {vendor}[/cyan]")
 
 
@@ -266,7 +317,6 @@ def remove(
 @key_app.command("set")
 def key_set(
     vendor: str = typer.Argument(..., help="Vendor name"),
-    key: Optional[str] = typer.Option(None, "--key", help="API key (if omitted, prompts interactively)"),
 ) -> None:
     """Set the API key for a vendor."""
     config = load_config()
@@ -274,8 +324,7 @@ def key_set(
         console.print(f"[red]Vendor '{vendor}' not found. Add it first.[/red]")
         raise typer.Exit(1)
 
-    if key is None:
-        key = typer.prompt("API key", hide_input=True)
+    key = typer.prompt("API key", hide_input=True)
 
     set_key(vendor, key)
     console.print(f"[green]API key saved for '{vendor}'.[/green]")
@@ -448,13 +497,106 @@ def uninstall(
     console.print("[green]claudeapikey uninstalled.[/green]")
 
 
+def _find_pids_on_port(port: int) -> list[int]:
+    """Find all PIDs of processes listening on the given port."""
+    import subprocess
+
+    for cmd in [f"lsof -ti :{port}", f"fuser {port}/tcp 2>/dev/null"]:
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                pids = []
+                for line in result.stdout.strip().splitlines():
+                    for token in line.split():
+                        try:
+                            pids.append(int(token))
+                        except ValueError:
+                            continue
+                return list(dict.fromkeys(pids))  # dedupe preserving order
+        except Exception:
+            continue
+    return []
+
+
+def _is_port_free(host: str, port: int) -> bool:
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        return sock.connect_ex((host, port)) != 0
+    finally:
+        sock.close()
+
+
 @app.command()
 def serve(
     port: int = typer.Option(8787, "--port", "-p", help="Port to bind on"),
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind on"),
+    kill: bool = typer.Option(False, "--kill", "-k", help="Kill existing process on the port before starting"),
 ) -> None:
     """Start the web dashboard."""
+    import socket
     import uvicorn
+
+    # Check if port is already in use
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    in_use = sock.connect_ex((host, port)) == 0
+    sock.close()
+
+    if in_use:
+        existing_pids = _find_pids_on_port(port)
+        if existing_pids:
+            pid_list = ", ".join(str(p) for p in existing_pids)
+            console.print(f"[yellow]Port {port} is already in use by PID(s): {pid_list}[/yellow]")
+            if kill:
+                import os
+                import signal
+                import time
+
+                # Phase 1: SIGTERM all PIDs
+                for pid in existing_pids:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    except PermissionError:
+                        console.print(f"[red]Permission denied to kill PID {pid}. Try: sudo kill -9 {pid}[/red]")
+                        raise typer.Exit(1)
+                console.print(f"[green]Sent SIGTERM to PID(s): {pid_list}[/green]")
+
+                # Wait up to 3s for graceful exit
+                for _ in range(15):
+                    time.sleep(0.2)
+                    if _is_port_free(host, port):
+                        break
+                else:
+                    # Phase 2: SIGKILL whatever is still on the port
+                    remaining = _find_pids_on_port(port)
+                    if remaining:
+                        for pid in remaining:
+                            try:
+                                os.kill(pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                        console.print(f"[green]Sent SIGKILL to remaining PID(s): {', '.join(str(p) for p in remaining)}[/green]")
+                        # Wait for port release
+                        for _ in range(20):
+                            time.sleep(0.2)
+                            if _is_port_free(host, port):
+                                break
+                # Final check
+                if not _is_port_free(host, port):
+                    console.print(f"[red]Port {port} is still in use after kill attempts.[/red]")
+                    console.print("Try manually: sudo fuser -k 8787/tcp")
+                    raise typer.Exit(1)
+            else:
+                console.print(f"[red]Port {port} is already in use.[/red]")
+                console.print(f"Run with --kill to replace it, or manually: kill -9 {pid_list}")
+                raise typer.Exit(1)
+        else:
+            console.print(f"[red]Port {port} is already in use by an unknown process.[/red]")
+            console.print("Run with --kill to attempt replacement, or choose a different port with --port")
+            raise typer.Exit(1)
 
     if host != "127.0.0.1":
         console.print("[yellow]Warning: Binding to non-loopback address is not recommended for security.[/yellow]")

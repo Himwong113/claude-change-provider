@@ -73,7 +73,7 @@ def test_key_set_get_delete() -> None:
         "--model", "test-model",
     ])
 
-    result = runner.invoke(app, ["key", "set", "test", "--key", "sk-secret"])
+    result = runner.invoke(app, ["key", "set", "test"], input="sk-secret\n")
     assert result.exit_code == 0
 
     result = runner.invoke(app, ["key", "get", "test", "--raw"])
@@ -93,7 +93,7 @@ def test_env_command() -> None:
         "--base-url", "https://example.com",
         "--model", "test-model",
     ])
-    runner.invoke(app, ["key", "set", "test", "--key", "sk-test"])
+    runner.invoke(app, ["key", "set", "test"], input="sk-test\n")
 
     result = runner.invoke(app, ["env", "test"])
     assert result.exit_code == 0
