@@ -37,7 +37,7 @@ if command -v claudeapikey &>/dev/null; then
     echo "claudeapikey already installed: $(which claudeapikey)"
 else
     # Create virtual environment
-    VENV_DIR="$PROJECT_DIR/.venv"
+    VENV_DIR="$PROJECT_DIR/.claudeapikey"
 
     if [[ ! -d "$VENV_DIR" ]]; then
         echo "Creating virtual environment in $VENV_DIR ..."
@@ -78,7 +78,32 @@ echo "  Installation Complete!"
 echo "========================================"
 echo ""
 echo "Quick start:"
-echo "  source .venv/bin/activate"
+# echo "  source .venv/bin/activate"
+echo "make the .claudeapikey/bin directory available in your PATH"
+export PATH="$PROJECT_DIR/.claudeapikey/bin:$PATH"
+# Auto-source venv in new bash sessions (avoid duplicates)
+SOURCE_LINE="source $PROJECT_DIR/.claudeapikey/bin/activate"
+if [[ -f "$HOME/.bashrc" ]] && ! grep -Fxq "$SOURCE_LINE" "$HOME/.bashrc" 2>/dev/null; then
+    echo "$SOURCE_LINE" >> "$HOME/.bashrc"
+    echo "Added auto-source to ~/.bashrc"
+fi
+
+read -p "Do you want to activate the venv in your current shell now? (Y/n): " answer
+if [[ "$answer" =~ ^[Nn]$ ]]; then
+    echo "Skipped. You can activate it later with:"
+    echo "  source ~/.bashrc"
+elif [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    # Script is being sourced (e.g., source ./init.sh) — can modify current shell
+    source "$HOME/.bashrc"
+    echo "Activated! Your prompt should now show (claudeapikey)"
+else
+    # Script is being executed (./init.sh) — cannot modify parent shell
+    echo ""
+    echo "Please run this command in your current shell to activate now:"
+    echo "  source ~/.bashrc"
+fi
+echo ""
+echo "Then you can run commands like:"
 echo "  claudeapikey add <vendor> --base-url <url> --model <model>"
 echo "  claudeapikey key set <vendor>"
 echo "  claudeapikey run <vendor>"
@@ -86,3 +111,4 @@ echo ""
 echo "Or start the web dashboard:"
 echo "  claudeapikey serve"
 echo ""
+

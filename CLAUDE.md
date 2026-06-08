@@ -8,10 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-Setup (creates `.venv`, installs package, runs `claudeapikey install`):
+Setup (creates `claudeapikey`, installs package, runs `claudeapikey install`):
 ```bash
 ./init.sh
-source .venv/bin/activate
+source .claudeapikey/bin/activate
 ```
 
 Run tests:

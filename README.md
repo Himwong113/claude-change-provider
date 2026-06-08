@@ -27,14 +27,21 @@ Switch between official Anthropic API, DeepSeek, Kimi, and other Claude-compatib
 git clone <repo>
 cd claudeapikey
 ./init.sh
-source .venv/bin/activate
 ```
 
 `init.sh` will:
 1. Check your Python version (3.10+ required)
-2. Create a virtual environment in `.venv/`
+2. Create a virtual environment in `.claudeapikey/`
 3. Install dependencies
 4. Run `claudeapikey install`
+5. Add auto-source to `~/.bashrc` so new sessions automatically activate the venv
+6. Ask if you want to activate the venv in your current shell now
+
+The virtual environment prompt is branded as `(claudeapikey)` instead of `(.venv)`.
+
+**Activating the venv:**
+- After `./init.sh`, run `source ~/.bashrc` to activate in your current shell
+- Or run `source ./init.sh` to have it activate automatically when complete
 
 ### With pipx (recommended for end users)
 
@@ -298,8 +305,8 @@ You forgot `--base-url` for a non-official vendor. Either provide a base URL or 
 
 ```bash
 # Setup
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .claudeapikey
+source .claudeapikey/bin/activate
 pip install -e ".[dev]"
 
 # Run tests

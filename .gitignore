@@ -57,6 +57,7 @@ cython_debug/
 # Environments
 .env
 .env.*
+.claudeapikey/
 .venv/
 venv/
 ENV/
