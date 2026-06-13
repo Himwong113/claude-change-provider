@@ -32,31 +32,27 @@ fi
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Check if claudeapikey is already installed
-if command -v claudeapikey &>/dev/null; then
-    echo "claudeapikey already installed: $(which claudeapikey)"
+# Create isolated development virtual environment
+VENV_DIR="$PROJECT_DIR/.claudeapikey"
+
+if [[ ! -d "$VENV_DIR" ]]; then
+    echo "Creating virtual environment in $VENV_DIR ..."
+    "$PYTHON_CMD" -m venv "$VENV_DIR"
 else
-    # Create virtual environment
-    VENV_DIR="$PROJECT_DIR/.claudeapikey"
-
-    if [[ ! -d "$VENV_DIR" ]]; then
-        echo "Creating virtual environment in $VENV_DIR ..."
-        "$PYTHON_CMD" -m venv "$VENV_DIR"
-    else
-        echo "Virtual environment already exists."
-    fi
-
-    # Activate venv
-    source "$VENV_DIR/bin/activate"
-
-    # Upgrade pip
-    echo "Upgrading pip ..."
-    pip install --quiet --upgrade pip
-
-    # Install package
-    echo "Installing claudeapikey ..."
-    pip install --quiet -e "$PROJECT_DIR"
+    echo "Virtual environment already exists."
 fi
+
+# Activate venv
+source "$VENV_DIR/bin/activate"
+
+# Upgrade pip
+echo "Upgrading pip ..."
+pip install --quiet --upgrade pip
+
+# Install package in editable mode so the local source is used
+# even if a system-wide claudeapikey is already present.
+echo "Installing claudeapikey ..."
+pip install --quiet -e "$PROJECT_DIR"
 
 # Check for claude
 echo ""
