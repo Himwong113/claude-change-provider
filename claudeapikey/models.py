@@ -38,3 +38,15 @@ class Config(BaseModel):
         default_factory=dict,
         description="Map of vendor name to profile",
     )
+    proxy_enabled: bool = Field(
+        default=False,
+        description="Route Anthropic API requests through the local proxy",
+    )
+    proxy_port: int = Field(
+        default=8787,
+        description="Port the local proxy listens on",
+    )
+    proxy_tiers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Map tier names (haiku/sonnet/opus/subagent/custom) to vendor model names",
+    )

@@ -121,3 +121,46 @@ def test_api_doctor() -> None:
     data = response.json()
     assert "messages" in data
     assert "ok" in data
+
+
+def test_proxy_status() -> None:
+    response = client.get("/api/proxy/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["enabled"] is False
+    assert data["url"] == "http://localhost:8787"
+    assert data["routes"] == []
+    assert data["tiers"] == {}
+
+
+def test_proxy_enable_disable() -> None:
+    response = client.post("/api/proxy/enable")
+    assert response.status_code == 200
+    assert response.json()["enabled"] is True
+
+    response = client.get("/api/proxy/status")
+    assert response.json()["enabled"] is True
+
+    response = client.post("/api/proxy/disable")
+    assert response.status_code == 200
+    assert response.json()["enabled"] is False
+
+
+def test_proxy_tiers() -> None:
+    response = client.put("/api/proxy/tiers", data={"tiers": "haiku=kimi\nsonnet=glm"})
+    assert response.status_code == 200
+    assert response.json()["tiers"] == {"haiku": "kimi", "sonnet": "glm"}
+
+    response = client.get("/api/proxy/status")
+    assert response.json()["tiers"] == {"haiku": "kimi", "sonnet": "glm"}
+
+
+def test_proxy_health() -> None:
+    response = client.get("/v1/health")
+    assert response.status_code == 200
+    assert response.json()["proxy"] is True
+
+
+def test_proxy_messages_disabled_by_default() -> None:
+    response = client.post("/v1/messages", json={"model": "m1"})
+    assert response.status_code == 503

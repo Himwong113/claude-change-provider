@@ -174,6 +174,29 @@
         <pre id="doctorOutput" class="hidden"></pre>
     </div>
 
+    <div class="card">
+        <h2>Proxy Mode</h2>
+        <p>Route Claude Code requests through this dashboard.</p>
+        <div id="proxyStatus">Loading...</div>
+        <button class="btn" id="proxyToggle" onclick="toggleProxy()">Enable</button>
+        <h3 style="margin-top:1rem;font-size:1rem;">Tier Aliases</h3>
+        <form id="tiersForm">
+            <div id="tierSelects" class="grid-2"></div>
+            <div class="form-row">
+                <label>Custom tiers (one KEY=VALUE per line)</label>
+                <textarea id="customTiersInput" rows="2" placeholder="myagent=kimi-k2.7-code"></textarea>
+            </div>
+            <button type="submit" class="btn btn-secondary">Save Tier Aliases</button>
+        </form>
+        <h3 style="margin-top:1rem;font-size:1rem;">Routes</h3>
+        <table>
+            <thead>
+                <tr><th>Model</th><th>Vendor</th></tr>
+            </thead>
+            <tbody id="proxyRoutes"></tbody>
+        </table>
+    </div>
+
     <!-- Set Key Modal -->
     <div id="setKeyModal" class="card hidden">
         <h2>Set Key for <span id="setKeyVendor"></span></h2>
@@ -387,8 +410,77 @@
             el.textContent = out + '\n\nResult: ' + (data.ok ? 'OK' : 'Issues found');
             el.classList.remove('hidden');
         }
+        async function loadProxyStatus() {
+            const res = await fetch('/api/proxy/status');
+            const data = await res.json();
+            const statusEl = document.getElementById('proxyStatus');
+            const toggleBtn = document.getElementById('proxyToggle');
+            statusEl.textContent = `Proxy ${data.enabled ? 'enabled' : 'disabled'} at ${data.url}`;
+            toggleBtn.textContent = data.enabled ? 'Disable' : 'Enable';
+            toggleBtn.dataset.enabled = data.enabled;
+
+            const modelOptions = data.routes.map(r => `<option value="${r.model}" title="${r.vendor}">${r.model} (${r.vendor})</option>`).join('');
+            const tierContainer = document.getElementById('tierSelects');
+            const knownTiers = ['default', 'haiku', 'sonnet', 'opus', 'subagent'];
+            tierContainer.innerHTML = knownTiers.map(tier => `
+                <div class="form-row">
+                    <label>${tier}</label>
+                    <select class="tier-select" data-tier="${tier}">
+                        <option value="">—</option>
+                        ${modelOptions}
+                    </select>
+                </div>
+            `).join('');
+            knownTiers.forEach(tier => {
+                const select = tierContainer.querySelector(`[data-tier="${tier}"]`);
+                if (select) select.value = data.tiers[tier] || '';
+            });
+
+            const customLines = Object.entries(data.tiers)
+                .filter(([k]) => !knownTiers.includes(k))
+                .map(([k, v]) => `${k}=${v}`)
+                .join('\n');
+            document.getElementById('customTiersInput').value = customLines;
+
+            document.getElementById('proxyRoutes').innerHTML = data.routes.map(r => `<tr><td>${r.model}</td><td>${r.vendor}</td></tr>`).join('');
+        }
+        async function toggleProxy() {
+            const btn = document.getElementById('proxyToggle');
+            const enabled = btn.dataset.enabled === 'true';
+            const res = await fetch('/api/proxy/' + (enabled ? 'disable' : 'enable'), { method: 'POST' });
+            if (res.ok) {
+                showMsg(enabled ? 'Proxy disabled' : 'Proxy enabled');
+                setTimeout(() => location.reload(), 600);
+            } else {
+                showMsg('Failed to toggle proxy', false);
+            }
+        }
+        async function saveTiers(e) {
+            e.preventDefault();
+            const lines = [];
+            document.querySelectorAll('.tier-select').forEach(select => {
+                const tier = select.dataset.tier;
+                const value = select.value;
+                if (tier && value) lines.push(`${tier}=${value}`);
+            });
+            const custom = document.getElementById('customTiersInput').value.trim();
+            if (custom) lines.push(custom);
+
+            const fd = new FormData();
+            fd.append('tiers', lines.join('\n'));
+            const res = await fetch('/api/proxy/tiers', { method: 'PUT', body: fd });
+            if (res.ok) {
+                showMsg('Tier aliases saved');
+                loadProxyStatus();
+            } else {
+                const data = await res.json();
+                showMsg(data.detail || 'Failed to save tiers', false);
+            }
+        }
         document.getElementById('addForm').addEventListener('submit', addVendor);
         document.getElementById('editForm').addEventListener('submit', editVendorSubmit);
+        document.getElementById('tiersForm').addEventListener('submit', saveTiers);
+        loadProxyStatus();
     </script>
 </body>
 </html>

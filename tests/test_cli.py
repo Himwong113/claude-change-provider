@@ -140,3 +140,28 @@ def test_uninstall() -> None:
     result = runner.invoke(app, ["uninstall", "--yes"])
     assert result.exit_code == 0
     assert "uninstalled" in result.output
+
+
+def test_proxy_enable_disable() -> None:
+    result = runner.invoke(app, ["proxy", "enable"])
+    assert result.exit_code == 0
+    assert "enabled" in result.output
+
+    result = runner.invoke(app, ["proxy", "status"])
+    assert result.exit_code == 0
+    assert "enabled" in result.output.lower()
+
+    result = runner.invoke(app, ["proxy", "disable"])
+    assert result.exit_code == 0
+    assert "disabled" in result.output
+
+
+def test_proxy_apply_local() -> None:
+    runner.invoke(app, [
+        "add", "kimi",
+        "--base-url", "https://api.kimi.com",
+        "--model", "kimi-k2.7-code",
+    ])
+    result = runner.invoke(app, ["proxy", "apply", "--local"])
+    assert result.exit_code == 0
+    assert "Applied" in result.output

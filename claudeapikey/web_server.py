@@ -4,18 +4,18 @@ from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
+from starlette.responses import Response
 
 from claudeapikey.config_store import load_config, save_config
 from claudeapikey.doctor import run_doctor
 from claudeapikey.env_builder import build_env
 from claudeapikey.models import Config, VendorProfile
+from claudeapikey.proxy import forward_messages
 from claudeapikey.secret_store import (
     delete_key,
     get_key,
-    key_exists,
     mask_key,
     set_key,
 )
@@ -41,6 +41,8 @@ _LOCALHOST_ORIGINS = {
 @app.middleware("http")
 async def csrf_origin_check(request: Request, call_next):  # type: ignore[no-untyped-def]
     if request.method not in _SAFE_METHODS:
+        if request.url.path.startswith("/v1/"):
+            return await call_next(request)
         origin = request.headers.get("origin")
         if origin is not None:
             # Strip port so http://127.0.0.1:8787 and http://localhost:8787 both pass
@@ -234,3 +236,72 @@ async def api_doctor() -> JSONResponse:
         "ok": result.ok,
         "messages": [{"status": s, "detail": d} for s, d in result.messages],
     })
+
+
+# ---------------------------------------------------------------------------
+# Proxy routes
+# ---------------------------------------------------------------------------
+
+
+@app.post("/v1/messages")
+async def proxy_messages(request: Request) -> Response:
+    """Anthropic-compatible messages endpoint that routes by model."""
+    return await forward_messages(request)
+
+
+@app.get("/v1/health")
+async def proxy_health() -> JSONResponse:
+    return JSONResponse({"status": "ok", "proxy": True})
+
+
+def _proxy_routes(config: Config) -> list[dict[str, str]]:
+    return [
+        {"model": profile.model, "vendor": name}
+        for name, profile in config.vendors.items()
+        if profile.model
+    ]
+
+
+@app.get("/api/proxy/status")
+async def api_proxy_status() -> JSONResponse:
+    config = load_config()
+    return JSONResponse({
+        "enabled": config.proxy_enabled,
+        "url": f"http://localhost:{config.proxy_port}",
+        "routes": _proxy_routes(config),
+        "tiers": config.proxy_tiers,
+    })
+
+
+@app.post("/api/proxy/enable")
+async def api_proxy_enable() -> JSONResponse:
+    config = load_config()
+    config.proxy_enabled = True
+    save_config(config)
+    return JSONResponse({"enabled": True})
+
+
+@app.post("/api/proxy/disable")
+async def api_proxy_disable() -> JSONResponse:
+    config = load_config()
+    config.proxy_enabled = False
+    save_config(config)
+    return JSONResponse({"enabled": False})
+
+
+@app.put("/api/proxy/tiers")
+async def api_proxy_tiers(tiers: str = Form(...)) -> JSONResponse:
+    """Update tier aliases. Expects one KEY=VALUE per line."""
+    parsed: dict[str, str] = {}
+    for line in tiers.strip().splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        parsed[k.strip()] = v.strip()
+
+    config = load_config()
+    config.proxy_tiers = parsed
+    save_config(config)
+    return JSONResponse({"tiers": config.proxy_tiers})
+

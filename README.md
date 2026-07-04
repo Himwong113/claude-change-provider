@@ -9,6 +9,7 @@ Switch between official Anthropic API, DeepSeek, Kimi, and other Claude-compatib
 ## Features
 
 - **One-command vendor switching** — `claudeapikey run deepseek`
+- **Model-routing proxy** — Run one local endpoint (`http://127.0.0.1:8787`) and route haiku/sonnet/opus/subagent requests to different providers by model name
 - **OS keyring storage** — API keys never touch disk in plain text
 - **Web dashboard** — Manage vendors from a browser at `http://127.0.0.1:8787`
 - **Systemd service** — Run the dashboard as a background user service
@@ -193,6 +194,20 @@ claude
 | `claudeapikey current` | Show the active vendor (if any) |
 
 The `use` command writes settings with `apiKeyHelper` so Claude Code can fetch the key on demand — the raw key is **never** written to the settings file.
+
+### Model-Routing Proxy
+
+| Command | Description |
+|---------|-------------|
+| `claudeapikey proxy enable --local` | Enable proxy mode and point Claude Code's local settings at it |
+| `claudeapikey proxy enable --global` | Same, but for `~/.claude/settings.json` |
+| `claudeapikey proxy disable` | Disable proxy mode (config is kept) |
+| `claudeapikey proxy status` | Show proxy status and available model routes |
+| `claudeapikey proxy apply --local` | Write proxy settings without toggling enable flag |
+
+The proxy lets Claude Code use a single local Anthropic-compatible endpoint (`http://127.0.0.1:8787`) while routing each request to the stored vendor that matches the request's `model` field. This makes it easy to map different Claude Code tiers (`haiku`, `sonnet`, `opus`, `subagent`) to different providers/models.
+
+See [PROXY.md](PROXY.md) for a full walkthrough.
 
 ### Web Dashboard
 

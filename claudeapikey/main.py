@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from claudeapikey import __version__
-from claudeapikey.claude_settings import apply_vendor, reset_settings
+from claudeapikey.claude_settings import apply_proxy_settings, apply_vendor, reset_settings
 from claudeapikey.config_store import (
     config_exists,
     get_config_path,
@@ -22,6 +22,7 @@ from claudeapikey.env_builder import build_env, build_env_exports
 from claudeapikey.models import Config, VendorProfile
 from claudeapikey.runner import find_claude, run_vendor
 from claudeapikey.systemd_service import (
+    SERVICE_NAME,
     disable_service,
     enable_service,
     install_service,
@@ -53,6 +54,9 @@ app.add_typer(key_app)
 
 service_app = typer.Typer(name="service", help="Manage systemd service")
 app.add_typer(service_app)
+
+proxy_app = typer.Typer(name="proxy", help="Manage model-routing proxy")
+app.add_typer(proxy_app)
 
 
 @app.command()
@@ -713,6 +717,77 @@ def service_status_cmd() -> None:
 
     if status["stdout"]:
         console.print(status["stdout"])
+
+
+@proxy_app.command("enable")
+def proxy_enable(
+    port: int = typer.Option(8787, "--port", "-p", help="Proxy port"),
+    local: bool = typer.Option(False, "--local", help="Apply to project-local settings"),
+    global_: bool = typer.Option(False, "--global", help="Apply to global settings"),
+) -> None:
+    """Enable proxy mode and optionally apply it to Claude Code settings."""
+    config = load_config()
+    config.proxy_enabled = True
+    if port != config.proxy_port:
+        config.proxy_port = port
+    save_config(config)
+    console.print(f"[green]Proxy mode enabled on port {port}.[/green]")
+    if local or global_:
+        try:
+            apply_proxy_settings(port=port, local=local, global_=global_)
+            scope = "local" if local else "global"
+            console.print(f"[green]Applied proxy settings to Claude Code {scope} settings.[/green]")
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+
+
+@proxy_app.command("disable")
+def proxy_disable() -> None:
+    """Disable proxy mode."""
+    config = load_config()
+    config.proxy_enabled = False
+    save_config(config)
+    console.print("[green]Proxy mode disabled.[/green]")
+
+
+@proxy_app.command("status")
+def proxy_status_cmd() -> None:
+    """Show proxy status and routing table."""
+    config = load_config()
+    table = Table(title="Proxy Routes")
+    table.add_column("Model", style="cyan")
+    table.add_column("Vendor", style="green")
+    table.add_column("Base URL", style="dim")
+    for name, profile in config.vendors.items():
+        if profile.model:
+            table.add_row(profile.model, name, profile.base_url or "(official)")
+    console.print(table)
+    console.print(f"Proxy enabled: {'[green]yes[/green]' if config.proxy_enabled else '[red]no[/red]'}")
+    console.print(f"Proxy URL: http://localhost:{config.proxy_port}")
+    if config.proxy_tiers:
+        console.print("Tier aliases:")
+        for tier, model in config.proxy_tiers.items():
+            console.print(f"  {tier}: {model}")
+
+
+@proxy_app.command("apply")
+def proxy_apply(
+    port: int = typer.Option(8787, "--port", "-p", help="Proxy port"),
+    local: bool = typer.Option(False, "--local", help="Apply to project-local settings"),
+    global_: bool = typer.Option(False, "--global", help="Apply to global settings"),
+) -> None:
+    """Write proxy settings to Claude Code settings without toggling proxy mode."""
+    if not local and not global_:
+        console.print("[red]Must specify --local or --global[/red]")
+        raise typer.Exit(1)
+    try:
+        apply_proxy_settings(port=port, local=local, global_=global_)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    scope = "local" if local else "global"
+    console.print(f"[green]Applied proxy settings to Claude Code {scope} settings.[/green]")
 
 
 def main() -> None:
