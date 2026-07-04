@@ -1,5 +1,6 @@
 """Typer CLI entry point for claudeapikey."""
 
+import os
 import sys
 from typing import Optional
 
@@ -10,6 +11,7 @@ from rich.table import Table
 
 from claudeapikey import __version__
 from claudeapikey.claude_settings import apply_proxy_settings, apply_vendor, reset_settings
+
 from claudeapikey.config_store import (
     config_exists,
     get_config_path,
@@ -81,6 +83,14 @@ def install() -> None:
 
 
 # Known vendor presets
+_TIER_ENV_MAP = {
+    "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "sonnet": "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "opus": "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "subagent": "CLAUDE_CODE_SUBAGENT_MODEL",
+}
+
+
 KNOWN_VENDORS: dict[str, dict[str, str | bool | dict[str, str]]] = {
     "kimi": {
         "base_url": "https://api.kimi.com/coding/",
@@ -418,6 +428,53 @@ def run(
     except (ValueError, RuntimeError) as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
+
+
+@app.command("run-proxy")
+def run_proxy(
+    extra_args: Optional[list[str]] = typer.Argument(None, help="Extra arguments for claude"),
+) -> None:
+    """Run Claude Code with proxy-mode settings.
+
+    Uses proxy_tiers to set ANTHROPIC_MODEL and per-tier env vars.
+    The proxy must be running (claudeapikey serve) for API calls to work.
+    """
+    config = load_config()
+    if not config.proxy_enabled:
+        console.print("[red]Proxy mode is not enabled. Run: claudeapikey proxy enable[/red]")
+        raise typer.Exit(1)
+
+    claude_path = find_claude()
+    if claude_path is None:
+        console.print("[red]'claude' command not found in PATH.[/red]")
+        raise typer.Exit(1)
+
+    from claudeapikey.claude_settings import apply_proxy_settings
+    apply_proxy_settings(port=config.proxy_port, local=True)
+
+    env = dict(os.environ)
+    env["ANTHROPIC_BASE_URL"] = f"http://localhost:{config.proxy_port}"
+    env["ANTHROPIC_API_KEY"] = "local-proxy"
+
+    from claudeapikey.env_builder import build_env
+    default_model = config.proxy_tiers.get("default")
+    if default_model:
+        env["ANTHROPIC_MODEL"] = default_model
+    elif config.active_vendor and config.active_vendor in config.vendors:
+        env["ANTHROPIC_MODEL"] = config.vendors[config.active_vendor].model
+
+    for tier, mapped_model in config.proxy_tiers.items():
+        env_var = _TIER_ENV_MAP.get(tier)
+        if env_var:
+            env[env_var] = mapped_model
+        elif tier != "default":
+            env[tier] = mapped_model
+
+    args = [claude_path, "--model", env.get("ANTHROPIC_MODEL", "")]
+    if extra_args:
+        args.extend(extra_args)
+
+    os.execvpe(claude_path, args, env)
 
 
 @app.command()

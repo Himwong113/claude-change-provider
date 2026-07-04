@@ -175,6 +175,7 @@ claudeapikey run outsource
 | Command | Description |
 |---------|-------------|
 | `claudeapikey run <vendor>` | Launch `claude` with the vendor's environment |
+| `claudeapikey run-proxy` | Launch `claude` with proxy-mode env vars (requires `proxy enable`) |
 | `claudeapikey env <vendor>` | Print shell `export` statements |
 
 `env` is useful when you want to apply settings manually:

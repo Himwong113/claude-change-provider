@@ -165,3 +165,9 @@ def test_proxy_apply_local() -> None:
     result = runner.invoke(app, ["proxy", "apply", "--local"])
     assert result.exit_code == 0
     assert "Applied" in result.output
+
+
+def test_run_proxy_fails_when_disabled() -> None:
+    result = runner.invoke(app, ["run-proxy"])
+    assert result.exit_code == 1
+    assert "not enabled" in result.output.lower()
