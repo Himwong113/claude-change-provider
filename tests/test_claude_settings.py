@@ -197,3 +197,4 @@ def test_apply_proxy_settings_uses_default_tier(tmp_path: Path, monkeypatch: pyt
 
     assert data["model"] == "glm-5.2"
     assert data["env"]["ANTHROPIC_MODEL"] == "glm-5.2"
+    assert "default" not in data["env"]

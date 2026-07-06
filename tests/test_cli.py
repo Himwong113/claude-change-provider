@@ -1,6 +1,7 @@
 """CLI integration tests using Typer CliRunner."""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
@@ -171,3 +172,41 @@ def test_run_proxy_fails_when_disabled() -> None:
     result = runner.invoke(app, ["run-proxy"])
     assert result.exit_code == 1
     assert "not enabled" in result.output.lower()
+
+
+def test_run_proxy_cleans_auth_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """run-proxy must drop stale ANTHROPIC_AUTH_TOKEN/API_KEY from the env."""
+    runner.invoke(app, ["proxy", "enable"])
+    runner.invoke(app, [
+        "add", "glm",
+        "--base-url", "https://api.glm.example",
+        "--model", "glm-5.2",
+    ])
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-token")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "stale-key")
+
+    captured: dict[str, object] = {}
+
+    def fake_execvpe(path: str, args: list[str], env: dict[str, str]) -> None:
+        captured["path"] = path
+        captured["args"] = args
+        captured["env"] = env
+        raise SystemExit(0)
+
+    monkeypatch.setattr("os.execvpe", fake_execvpe)
+    # Pretend the proxy health endpoint is reachable.
+    def fake_urlopen(url: str, timeout: float | None = None) -> MagicMock:
+        captured["health_url"] = url
+        return MagicMock(status=200, __enter__=lambda s: s, __exit__=lambda *a: None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = runner.invoke(app, ["run-proxy"])
+    assert result.exit_code == 0
+    env = captured["env"]
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert env["ANTHROPIC_API_KEY"] == "local-proxy"
+    assert env["ANTHROPIC_BASE_URL"] == "http://localhost:8787"
+    # The health check should have used 127.0.0.1.
+    assert captured["health_url"] == "http://127.0.0.1:8787/v1/health"

@@ -82,6 +82,8 @@ def apply_proxy_settings(
         data.pop("model", None)
 
     for tier, mapped_model in config.proxy_tiers.items():
+        if tier == "default":
+            continue
         env_var = _TIER_ENV_MAP.get(tier)
         if env_var:
             env[env_var] = mapped_model

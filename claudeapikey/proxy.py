@@ -24,6 +24,10 @@ _HOP_BY_HOP = {
     "host",
     "content-length",
     "authorization",
+    # Strip any client-provided API key headers; the proxy injects the real
+    # vendor key before forwarding. This prevents the dummy "local-proxy" key
+    # (or a stale token) from reaching upstream providers.
+    "x-api-key",
 }
 
 
@@ -56,11 +60,17 @@ def build_target_url(vendor: VendorProfile) -> str:
     base = (vendor.base_url or "").rstrip("/")
     if not base:
         raise ValueError("non-official vendor missing base_url")
+    if base.endswith("/v1/messages"):
+        return base
+    if base.endswith("/v1"):
+        return f"{base}/messages"
     return f"{base}/v1/messages"
 
 
-def get_auth_header(key: str) -> dict[str, str]:
-    """Return the Authorization header for the upstream request."""
+def get_auth_header(key: str, vendor: VendorProfile | None = None) -> dict[str, str]:
+    """Return the auth header for the upstream request."""
+    if vendor is not None and vendor.auth_env == "ANTHROPIC_API_KEY":
+        return {"x-api-key": key}
     return {"Authorization": f"Bearer {key}"}
 
 
@@ -108,7 +118,7 @@ async def forward_messages(request: Request) -> Response:
         return _error_response(500, str(exc))
 
     headers = _forwardable_headers(request)
-    headers.update(get_auth_header(key))
+    headers.update(get_auth_header(key, vendor))
 
     client = httpx.AsyncClient()
     stream_ctx = client.stream(

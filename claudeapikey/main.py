@@ -452,9 +452,29 @@ def run_proxy(
     from claudeapikey.claude_settings import apply_proxy_settings
     apply_proxy_settings(port=config.proxy_port, local=True)
 
+    # Build a clean environment so leftover shell auth vars do not leak into
+    # Claude Code or confuse the proxy. We intentionally drop any pre-existing
+    # ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN and set only the proxy dummy key.
     env = dict(os.environ)
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    env.pop("ANTHROPIC_API_KEY", None)
     env["ANTHROPIC_BASE_URL"] = f"http://localhost:{config.proxy_port}"
     env["ANTHROPIC_API_KEY"] = "local-proxy"
+
+    # Sanity-check that the proxy is actually reachable before launching Claude.
+    # Use 127.0.0.1 to match the default bind address of `claudeapikey serve`.
+    proxy_url = f"http://127.0.0.1:{config.proxy_port}/v1/health"
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(proxy_url, timeout=2.0) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"proxy health returned {resp.status}")
+    except Exception as exc:
+        console.print(
+            f"[yellow]Warning: proxy does not appear to be running at {proxy_url} ({exc}).[/yellow]"
+        )
+        console.print("[yellow]Start it with: claudeapikey serve[/yellow]")
 
     from claudeapikey.env_builder import build_env
     default_model = config.proxy_tiers.get("default")

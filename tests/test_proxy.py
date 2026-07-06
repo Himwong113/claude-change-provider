@@ -43,12 +43,17 @@ def isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _request_with_body(body: bytes) -> Request:
+def _request_with_body(body: bytes, headers: list[tuple[bytes, bytes]] | None = None) -> Request:
     async def receive() -> dict:
         return {"type": "http.request", "body": body, "more_body": False}
 
     return Request(
-        {"type": "http", "method": "POST", "path": "/v1/messages", "headers": []},
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/messages",
+            "headers": headers or [],
+        },
         receive=receive,
     )
 
@@ -88,8 +93,28 @@ def test_build_target_url_custom() -> None:
     assert build_target_url(vendor) == "https://api.example.com/anthropic/v1/messages"
 
 
+def test_build_target_url_accepts_v1_base() -> None:
+    vendor = VendorProfile(base_url="https://api.example.com/anthropic/v1", model="m1")
+    assert build_target_url(vendor) == "https://api.example.com/anthropic/v1/messages"
+
+
+def test_build_target_url_accepts_messages_endpoint() -> None:
+    vendor = VendorProfile(base_url="https://api.example.com/anthropic/v1/messages", model="m1")
+    assert build_target_url(vendor) == "https://api.example.com/anthropic/v1/messages"
+
+
 def test_get_auth_header() -> None:
     assert get_auth_header("sk-test") == {"Authorization": "Bearer sk-test"}
+
+
+def test_get_auth_header_api_key_vendor() -> None:
+    vendor = VendorProfile(base_url="https://api.example.com", auth_env="ANTHROPIC_API_KEY", model="m1")
+    assert get_auth_header("sk-test", vendor) == {"x-api-key": "sk-test"}
+
+
+def test_get_auth_header_auth_token_vendor() -> None:
+    vendor = VendorProfile(base_url="https://api.example.com", auth_env="ANTHROPIC_AUTH_TOKEN", model="m1")
+    assert get_auth_header("sk-test", vendor) == {"Authorization": "Bearer sk-test"}
 
 
 async def _async_iter(items: list[bytes]) -> AsyncIterator[bytes]:
@@ -159,5 +184,45 @@ def test_forward_messages_success() -> None:
     assert response.status_code == 200
     mock_client.stream.assert_called_once()
     call_kwargs = mock_client.stream.call_args.kwargs
-    assert call_kwargs["headers"]["Authorization"] == "Bearer sk-secret"
+    assert call_kwargs["headers"]["x-api-key"] == "sk-secret"
     assert call_kwargs["content"] == json.dumps({"model": "m1"}).encode()
+
+
+def test_forward_messages_strips_client_api_key_headers() -> None:
+    """Client-provided API key headers must be replaced with the vendor key."""
+    save_config(
+        Config(
+            proxy_enabled=True,
+            vendors={"v1": VendorProfile(base_url="https://api.example.com", model="m1")},
+        )
+    )
+    set_key("v1", "sk-secret")
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {"content-type": "application/json"}
+    mock_response.aiter_raw.return_value = _async_iter([b'{"ok": true}'])
+
+    mock_stream_ctx = MagicMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    mock_client = MagicMock()
+    mock_client.stream.return_value = mock_stream_ctx
+    mock_client.aclose = AsyncMock()
+
+    with patch("claudeapikey.proxy.httpx.AsyncClient", return_value=mock_client):
+        # Inject headers as if Claude Code sent them with the dummy proxy key.
+        request = _request_with_body(
+            json.dumps({"model": "m1"}).encode(),
+            headers=[
+                (b"authorization", b"Bearer local-proxy"),
+                (b"x-api-key", b"local-proxy"),
+            ],
+        )
+        response = asyncio.run(forward_messages(request))
+
+    assert response.status_code == 200
+    call_kwargs = mock_client.stream.call_args.kwargs
+    assert call_kwargs["headers"]["x-api-key"] == "sk-secret"
+    assert "authorization" not in {k.lower() for k in call_kwargs["headers"]}
